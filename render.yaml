@@ -1,0 +1,11 @@
+services:
+  - name: 21game-backend
+    type: web
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: PORT
+        value: 10000
