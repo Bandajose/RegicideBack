@@ -40,10 +40,10 @@ io.on("connection", (socket) => {
                 },
                 playerTurn: '',
                 playerPhase: '',
+                endGame: false,
+                winGame: false
             },
             turnIndex: 0,
-            endGame: false,
-            winGame: false,
         };
         callback({ success: true, message: "Sala creada" });
         io.emit("updateRooms", Object.keys(rooms));
@@ -85,6 +85,9 @@ io.on("connection", (socket) => {
         room.gameBoard.currentBoss = getBoss(room.gameBoard.bosses.pop());
         console.log("🎲 getBoss", room.gameBoard.currentBoss); // 🔍 Debug en el servidor
         room.gameBoard.playerPhase = 'attack';
+
+        room.gameBoard.endGame = false;
+        room.gameBoard.winGame = false;
 
         //Mano del jugador
         const handSize = 5;
@@ -220,23 +223,23 @@ io.on("connection", (socket) => {
                     room.gameBoard.currentBoss = getBoss(room.gameBoard.bosses.pop());
                 }
                 else if (room.gameBoard.currentBoss.health <= 0 && room.gameBoard.bosses.length === 0) {
-                    room.endGame = true;
-                    room.winGame = true;
+                    room.gameBoard.endGame = true;
+                    room.gameBoard.winGame = true;
                 }
             }
 
         }
         else if (action === 'defend') {
 
-            if (room.gameBoard.currentBoss.damage <= totalpoints) {
-                // // Avanzar el turno al siguiente jugador
-                room.turnIndex = (room.turnIndex + 1) % room.players.length;
-                room.gameBoard.playerTurn = room.players[room.turnIndex].id;
-
-                room.gameBoard.playerPhase = 'attack';
+            if (room.gameBoard.currentBoss.damage > totalpoints) {
+                room.gameBoard.endGame = true;
             }
             else {
-                room.endGame = true;
+                 // // Avanzar el turno al siguiente jugador
+                 room.turnIndex = (room.turnIndex + 1) % room.players.length;
+                 room.gameBoard.playerTurn = room.players[room.turnIndex].id;
+ 
+                 room.gameBoard.playerPhase = 'attack';
             }
 
         }
