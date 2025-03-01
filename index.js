@@ -278,16 +278,30 @@ function generateDeck() {
     return deck.sort(() => Math.random() - 0.5);
 }
 
+// function generateBosses() {
+//     const suits = ['♥', '♦', '♣', '♠'];
+//     const values = ['J', 'Q', 'K'];
+//     let deck = [];
+//     for (let suit of suits) {
+//         for (let value of values) {
+//             deck.push({ value, suit });
+//         }
+//     }
+//     return deck.sort(() => Math.random() - 0.5);
+// }
+
 function generateBosses() {
     const suits = ['♥', '♦', '♣', '♠'];
-    const values = ['J', 'Q', 'K'];
+    const values = ['K','Q','J'];
     let deck = [];
-    for (let suit of suits) {
-        for (let value of values) {
+
+    for (let value of values) {
+        let shuffledSuits = suits.sort(() => Math.random() - 0.5);
+        for (let suit of shuffledSuits) {
             deck.push({ value, suit });
         }
     }
-    return deck.sort(() => Math.random() - 0.5);
+    return deck;
 }
 
 function getBoss(boss) {
