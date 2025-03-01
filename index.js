@@ -38,7 +38,8 @@ io.on("connection", (socket) => {
                     effects: '',
                     effectBloqued: false
                 },
-                playerTurn: ''
+                playerTurn: '',
+                playerPhase: '',
             },
             turnIndex: 0,
             endGame: false,
@@ -83,7 +84,7 @@ io.on("connection", (socket) => {
         console.log("🎲 generateBosses", room.gameBoard.bosses); // 🔍 Debug en el servidor
         room.gameBoard.currentBoss = getBoss(room.gameBoard.bosses.pop());
         console.log("🎲 getBoss", room.gameBoard.currentBoss); // 🔍 Debug en el servidor
-
+        room.gameBoard.playerPhase = 'attack';
 
         //Mano del jugador
         const handSize = 5;
@@ -127,87 +128,122 @@ io.on("connection", (socket) => {
             // console.log("currentPlayer.hand.filter", currentPlayer.hand.filter(c => !(c.value === card.value && c.suit === card.suit))); // 🔍 Debug en el servidor
             room.gameBoard.table.push(card);
             currentPlayer.hand = currentPlayer.hand.filter(c => !(c.value === card.value && c.suit === card.suit));
-            totalpoints += parseInt(card.value);
+
+            if (card.value === 'A') totalpoints += 1;
+            else if (card.value === 'J') totalpoints += 10;
+            else if (card.value === 'Q') totalpoints += 15;
+            else if (card.value === 'K') totalpoints += 20;
+            else
+                totalpoints += parseInt(card.value);
         }
         // console.log("room.gameBoard.table", room.gameBoard.table); // 🔍 Debug en el servidor
         // console.log("currentPlayer.hand", currentPlayer.hand); // 🔍 Debug en el servidor
 
-        //Validar efectos de las cartas
-        if (cards.some(card => card.suit === 'Joker')) {
-            room.gameBoard.currentBoss.effectBloqued = true;
-        }
-        else {
-            //Agregar variable con solo el suit de la cartas sin repetir
-            let suits = [...new Set(cards.map(card => card.suit))];
-            console.log("suits", suits); // 🔍 Debug en el servidor
+        if (action === 'attack') {
 
-            suits.forEach(suit => {
+            room.gameBoard.playerPhase = 'defend';
 
-                console.log("Efectos revisados", suit); // 🔍 Debug en el servidor
+            //Validar efectos de las cartas
+            if (cards.some(card => card.suit === 'Joker')) {
+                room.gameBoard.currentBoss.effectBloqued = true;
 
-                if (room.gameBoard.currentBoss.suit !== suit || room.gameBoard.currentBoss.effectBloqued) {
+                // // Avanzar el turno al siguiente jugador
+                room.turnIndex = (room.turnIndex + 1) % room.players.length;
+                room.gameBoard.playerTurn = room.players[room.turnIndex].id;
 
-                    if (suit === '♥') {
-                        room.gameBoard.grave = room.gameBoard.grave.sort(() => Math.random() - 0.5);
-                        let cardsRevived = room.gameBoard.grave.splice(0, totalpoints);
-                        console.log("cardsRevived", cardsRevived); // 🔍 Debug en el servidor
-                        room.gameBoard.deck = room.gameBoard.deck.concat(cardsRevived);
-                        room.gameBoard.deck = room.gameBoard.deck.sort(() => Math.random() - 0.5);
-                    }
+                room.gameBoard.playerPhase = 'Joker';
+            }
+            else {
+                //Agregar variable con solo el suit de la cartas sin repetir
+                let suits = [...new Set(cards.map(card => card.suit))];
+                console.log("suits", suits); // 🔍 Debug en el servidor
 
-                    if (suit === '♦') {
-                        let players = room.players;
-                        let playerIndex = room.turnIndex;
-                        for (let i = 0; i < totalpoints; i++) {
-                            if (players[playerIndex].hand.length < 5 && room.gameBoard.deck.length > 0)
-                                players[playerIndex].hand.push(room.gameBoard.deck.pop());
+                suits.forEach(suit => {
 
-                            playerIndex = (playerIndex + 1) % players.length;
+                    console.log("Efectos revisados", suit); // 🔍 Debug en el servidor
+
+                    if (room.gameBoard.currentBoss.suit !== suit || room.gameBoard.currentBoss.effectBloqued) {
+
+                        if (suit === '♥') {
+                            room.gameBoard.grave = room.gameBoard.grave.sort(() => Math.random() - 0.5);
+                            let cardsRevived = room.gameBoard.grave.splice(0, totalpoints);
+                            console.log("cardsRevived", cardsRevived); // 🔍 Debug en el servidor
+                            room.gameBoard.deck = room.gameBoard.deck.concat(cardsRevived);
+                            room.gameBoard.deck = room.gameBoard.deck.sort(() => Math.random() - 0.5);
                         }
 
-                        room.players.forEach(player => {
-                            io.to(player.id).emit("getPlayerData", { hand: player.hand });
-                        });
+                        if (suit === '♦') {
+                            let players = room.players;
+                            let playerIndex = room.turnIndex;
+                            for (let i = 0; i < totalpoints; i++) {
+                                if (players[playerIndex].hand.length < 5 && room.gameBoard.deck.length > 0)
+                                    players[playerIndex].hand.push(room.gameBoard.deck.pop());
+
+                                playerIndex = (playerIndex + 1) % players.length;
+                            }
+
+                            room.players.forEach(player => {
+                                io.to(player.id).emit("getPlayerData", { hand: player.hand });
+                            });
+                        }
+
+                        if (suit === '♣') {
+                            multiplePoints = true;
+                        }
+
+                        if (suit === '♠') {
+                            room.gameBoard.currentBoss.damage -= totalpoints;
+                        }
+                    }
+                });
+
+                room.gameBoard.currentBoss.health -= multiplePoints ? totalpoints * 2 : totalpoints;
+
+                console.log("room.gameBoard.currentBoss.health", room.gameBoard.currentBoss.health); // 🔍 Debug en el servidor
+
+                if (room.gameBoard.currentBoss.health <= 0 && room.gameBoard.bosses.length > 0) {
+
+                    room.gameBoard.playerPhase = 'attack';
+
+                    if (room.gameBoard.currentBoss.health == 0) {
+                        //mandar jefe al pricipio del deck con estrucutura de valor y suit
+                        room.gameBoard.deck.unshift({ value: room.gameBoard.currentBoss.value, suit: room.gameBoard.currentBoss.suit });
+                    } else {
+                        //mandar jefe al al grave con estrucutura de valor y suit
+                        room.gameBoard.grave.push({ value: room.gameBoard.currentBoss.value, suit: room.gameBoard.currentBoss.suit });
                     }
 
-                    if (suit === '♣') {
-                        multiplePoints = true;
-                    }
+                    //mandar cartas table al grave y limpiar table
+                    room.gameBoard.grave = room.gameBoard.grave.concat(room.gameBoard.table);
+                    room.gameBoard.table = [];
 
-                    if (suit === '♠') {
-                        room.gameBoard.currentBoss.damage -= totalpoints;
-                    }
+                    room.gameBoard.currentBoss = getBoss(room.gameBoard.bosses.pop());
                 }
-            });
-
-            room.gameBoard.currentBoss.health -= multiplePoints ? totalpoints * 2 : totalpoints;
-            
-            if (room.gameBoard.currentBoss.health <= 0 && room.gameBoard.bosses.length > 0) {
-
-                if (room.gameBoard.currentBoss.health == 0) {
-                    //mandar jefe al pricipio del deck con estrucutura de valor y suit
-                    room.gameBoard.deck.unshift({ value: room.gameBoard.currentBoss.value, suit: room.gameBoard.currentBoss.suit });
-                } else {
-                    //mandar jefe al al grave con estrucutura de valor y suit
-                    room.gameBoard.grave.push({ value: room.gameBoard.currentBoss.value, suit: room.gameBoard.currentBoss.suit });
+                else if (room.gameBoard.currentBoss.health <= 0 && room.gameBoard.bosses.length === 0) {
+                    room.endGame = true;
+                    room.winGame = true;
                 }
-
-                //mandar cartas table al grave y limpiar table
-                room.gameBoard.grave = room.gameBoard.grave.concat(room.gameBoard.table);
-                room.gameBoard.table = [];
-
-                room.gameBoard.currentBoss = getBoss(room.gameBoard.bosses.pop());
             }
-            else if (room.gameBoard.currentBoss.health <= 0 && room.gameBoard.bosses.length === 0) {
+
+        }
+        else if (action === 'defend') {
+
+            if (room.gameBoard.currentBoss.damage <= totalpoints) {
+                // // Avanzar el turno al siguiente jugador
+                room.turnIndex = (room.turnIndex + 1) % room.players.length;
+                room.gameBoard.playerTurn = room.players[room.turnIndex].id;
+
+                room.gameBoard.playerPhase = 'attack';
+            }
+            else {
                 room.endGame = true;
             }
+
         }
 
         io.to(playerId).emit("getPlayerData", { hand: currentPlayer.hand });
-        // // Avanzar el turno al siguiente jugador
-        room.turnIndex = (room.turnIndex + 1) % room.players.length;
-        room.gameBoard.playerTurn = room.players[room.turnIndex].id;
         io.to(roomName).emit("boardStatus", room.gameBoard);
+
     });
 
     socket.on("disconnect", () => {
@@ -232,7 +268,7 @@ function generateDeck() {
             deck.push({ value, suit });
         }
     }
-    
+
     deck.push({ value: '0', suit: 'Joker' });
     deck.push({ value: '1', suit: 'Joker' });
 
