@@ -12,6 +12,13 @@ const io = new Server(server, {
 
 let rooms = {};
 
+function getBoardPayload(room) {
+    return {
+        ...room.gameBoard,
+        players: room.players.map(p => ({ id: p.id, cardCount: p.hand.length }))
+    };
+}
+
 function buildRoomResponse(page = '1', size = '5') {
     const pageNum = parseInt(page) || 1;
     const sizeNum = parseInt(size) || 5;
@@ -137,7 +144,7 @@ io.on("connection", (socket) => {
             io.to(player.id).emit("getPlayerData", { hand: player.hand });
         });
 
-        io.to(roomName).emit("boardStatus", room.gameBoard);
+        io.to(roomName).emit("boardStatus", getBoardPayload(room));
         io.emit("updateRooms", buildRoomResponse());
     });
 
@@ -244,7 +251,15 @@ io.on("connection", (socket) => {
         }
 
         io.to(playerId).emit("getPlayerData", { hand: currentPlayer.hand });
-        io.to(roomName).emit("boardStatus", room.gameBoard);
+        io.to(roomName).emit("boardStatus", getBoardPayload(room));
+    });
+
+    socket.on("getBoardStatus", (roomName) => {
+        const room = rooms[roomName];
+        if (!room || !room.gameStarted) return;
+        socket.emit("boardStatus", getBoardPayload(room));
+        const player = room.players.find(p => p.id === socket.id);
+        if (player) socket.emit("getPlayerData", { hand: player.hand });
     });
 
     socket.on("disconnect", () => {
