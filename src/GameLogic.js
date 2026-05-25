@@ -29,14 +29,18 @@ function generateDeck() {
     return shuffle(deck);
 }
 
-function generateBosses() {
+// randomBosses = true → palos aleatorios dentro de cada tier (J/Q/K)
+// randomBosses = false → palos en orden fijo [♥, ♦, ♣, ♠]
+function generateBosses(randomBosses = true) {
     const suits = ['♥', '♦', '♣', '♠'];
     const values = ['K', 'Q', 'J'];
     const bosses = [];
 
-    for (const value of values)
-        for (const suit of shuffle(suits))
+    for (const value of values) {
+        const orderedSuits = randomBosses ? shuffle([...suits]) : suits;
+        for (const suit of orderedSuits)
             bosses.push({ value, suit });
+    }
 
     return bosses;
 }
@@ -59,7 +63,9 @@ function buildBoss({ value, suit }) {
     return { value, suit, health, damage, effects: BOSS_EFFECTS[suit] ?? '', effectBloqued: false };
 }
 
-function dealHands(room, handSize = 5) {
+// Reparte mano inicial usando room.config.handSize
+function dealHands(room) {
+    const handSize = room.config.handSize;
     for (const player of room.players)
         for (let i = 0; i < handSize && room.board.deck.length > 0; i++)
             player.hand.push(room.board.deck.pop());
@@ -67,7 +73,6 @@ function dealHands(room, handSize = 5) {
 
 // ─── Lógica de turno ───────────────────────────────────────────────────────
 
-// Mueve las cartas jugadas a la mano del jugador actual y calcula puntos.
 function processCards(room, cards) {
     const player = room.currentPlayer;
     let totalPoints = 0;
@@ -87,7 +92,6 @@ function resolveAttack(room, cards) {
 
     board.playerPhase = 'defend';
 
-    // Caso especial: Joker bloquea el efecto del jefe
     if (cards.some(c => c.suit === 'Joker')) {
         board.currentBoss.effectBloqued = true;
         room.nextTurn();
@@ -99,7 +103,6 @@ function resolveAttack(room, cards) {
     const suits = [...new Set(cards.map(c => c.suit))];
 
     for (const suit of suits) {
-        // El efecto solo aplica si el palo es distinto al del jefe, o si su efecto está bloqueado
         const effectActive = board.currentBoss.suit !== suit || board.currentBoss.effectBloqued;
         if (!effectActive) continue;
 
@@ -113,7 +116,7 @@ function resolveAttack(room, cards) {
         if (suit === '♦') {
             let idx = room.turnIndex;
             for (let i = 0; i < totalPoints; i++) {
-                if (room.players[idx].hand.length < 5 && board.deck.length > 0)
+                if (room.players[idx].hand.length < room.config.handSize && board.deck.length > 0)
                     room.players[idx].hand.push(board.deck.pop());
                 idx = (idx + 1) % room.players.length;
             }
@@ -135,14 +138,19 @@ function resolveDefend(room, cards) {
     const totalPoints = processCards(room, cards);
 
     if (board.currentBoss.damage > totalPoints) {
-        board.endGame = true;
+        if (board.lives > 0) {
+            board.lives--;
+            room.nextTurn();
+            board.playerPhase = 'attack';
+        } else {
+            board.endGame = true;
+        }
     } else {
         room.nextTurn();
         board.playerPhase = 'attack';
     }
 }
 
-// Avanza al siguiente jefe o termina la partida.
 function _advanceBoss(room) {
     const { board } = room;
 
@@ -152,12 +160,10 @@ function _advanceBoss(room) {
         return;
     }
 
-    // Exactamente 0 HP → jefe va al inicio del mazo (se puede usar después)
-    if (board.currentBoss.health === 0) {
+    if (board.currentBoss.health === 0)
         board.deck.unshift({ value: board.currentBoss.value, suit: board.currentBoss.suit });
-    } else {
+    else
         board.grave.push({ value: board.currentBoss.value, suit: board.currentBoss.suit });
-    }
 
     board.grave = [...board.grave, ...board.table];
     board.table = [];

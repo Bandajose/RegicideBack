@@ -1,7 +1,6 @@
 const { Room } = require('./Room');
 const { generateDeck, generateBosses, buildBoss, dealHands, resolveAttack, resolveDefend } = require('./GameLogic');
 
-// Registro en memoria de todas las salas activas
 const rooms = {};
 
 // ─── Respuesta paginada de salas ───────────────────────────────────────────
@@ -18,7 +17,7 @@ function buildRoomResponse(page = '1', size = '5') {
         rooms: roomNames.slice(start, start + sizeNum).map(name => ({
             roomName: name,
             playerNumber: rooms[name].players.length,
-            maxPlayerNumber: 6,
+            maxPlayerNumber: rooms[name].config.maxPlayers,
         })),
         totalRooms: String(total),
         totalPages: String(totalPages),
@@ -48,8 +47,8 @@ function registerHandlers(io, socket) {
 
     socket.on('joinRoom', (roomName, callback) => {
         const room = rooms[roomName];
-        if (!room)           return callback?.({ success: false, message: 'Sala no encontrada' });
-        if (room.isFull)     return callback?.({ success: false, message: 'Sala llena' });
+        if (!room)            return callback?.({ success: false, message: 'Sala no encontrada' });
+        if (room.isFull)      return callback?.({ success: false, message: 'Sala llena' });
         if (room.gameStarted) return callback?.({ success: false, message: 'Partida en curso' });
 
         room.addPlayer(socket.id);
@@ -57,25 +56,72 @@ function registerHandlers(io, socket) {
         console.log(`🎮 Jugador ${socket.id} unido a "${roomName}"`);
 
         callback?.({ success: true, message: 'Unido a la sala', playerId: socket.id });
-        io.to(roomName).emit('updatePlayers', room.players.map(p => p.id));
+        io.to(roomName).emit('updateLobby', room.lobbyPayload);
+        io.emit('updateRooms', buildRoomResponse());
+    });
+
+    // El líder actualiza la configuración de la sala
+    socket.on('setConfig', ({ roomName, config }) => {
+        const room = rooms[roomName];
+        if (!room || room.gameStarted) return;
+        if (room.players[0]?.id !== socket.id) return; // Solo el líder
+
+        room.updateConfig(config);
+        console.log(`⚙️ Config actualizada en "${roomName}":`, room.config);
+        io.to(roomName).emit('updateLobby', room.lobbyPayload);
+        io.emit('updateRooms', buildRoomResponse());
+    });
+
+    // Un jugador (no líder) marca/desmarca su estado listo
+    socket.on('setReady', (roomName) => {
+        const room = rooms[roomName];
+        if (!room || room.gameStarted) return;
+        const player = room.findPlayer(socket.id);
+        if (!player) return;
+        if (room.players[0]?.id === socket.id) return; // El líder no necesita marcar listo
+
+        player.ready = !player.ready;
+        console.log(`✋ Jugador ${socket.id} → ready: ${player.ready}`);
+        io.to(roomName).emit('updateLobby', room.lobbyPayload);
+    });
+
+    // El líder expulsa a un jugador
+    socket.on('kickPlayer', ({ roomName, targetId }) => {
+        const room = rooms[roomName];
+        if (!room || room.gameStarted) return;
+        if (room.players[0]?.id !== socket.id) return; // Solo el líder
+        if (socket.id === targetId) return;            // No puede expulsarse a sí mismo
+
+        room.removePlayer(targetId);
+
+        const targetSocket = io.sockets.sockets.get(targetId);
+        if (targetSocket) {
+            targetSocket.emit('kicked');
+            targetSocket.leave(roomName);
+        }
+
+        console.log(`🚫 Jugador ${targetId} expulsado de "${roomName}"`);
+        io.to(roomName).emit('updateLobby', room.lobbyPayload);
         io.emit('updateRooms', buildRoomResponse());
     });
 
     socket.on('startGame', (roomName) => {
         const room = rooms[roomName];
         if (!room || room.players.length < 2 || room.gameStarted) return;
+        if (!room.allReady) return; // Todos los no-líderes deben estar listos
 
         room.gameStarted = true;
         room.board.deck = generateDeck();
-        room.board.bosses = generateBosses();
+        room.board.bosses = generateBosses(room.config.randomBosses);
         room.board.currentBoss = buildBoss(room.board.bosses.pop());
         room.board.playerPhase = 'attack';
         room.board.endGame = false;
         room.board.winGame = false;
+        room.board.lives = room.config.lives;
 
         dealHands(room);
         room.board.playerTurn = room.currentPlayer.id;
-        console.log(`🎲 Partida iniciada en "${roomName}". Primer turno: ${room.board.playerTurn}`);
+        console.log(`🎲 Partida iniciada en "${roomName}". Turno: ${room.board.playerTurn}`);
 
         room.players.forEach(p => io.to(p.id).emit('getPlayerData', { hand: p.hand }));
         io.to(roomName).emit('boardStatus', room.boardPayload);
@@ -87,13 +133,9 @@ function registerHandlers(io, socket) {
         if (!room?.gameStarted) return;
         if (room.currentPlayer.id !== playerId) return;
 
-        if (action === 'attack') {
-            resolveAttack(room, cards);
-        } else if (action === 'defend') {
-            resolveDefend(room, cards);
-        }
+        if (action === 'attack') resolveAttack(room, cards);
+        else if (action === 'defend') resolveDefend(room, cards);
 
-        // Enviar mano actualizada a todos y estado del tablero a la sala
         room.players.forEach(p => io.to(p.id).emit('getPlayerData', { hand: p.hand }));
         io.to(roomName).emit('boardStatus', room.boardPayload);
     });
@@ -101,8 +143,8 @@ function registerHandlers(io, socket) {
     socket.on('getBoardStatus', (roomName) => {
         const room = rooms[roomName];
         if (!room?.gameStarted) return;
-        const player = room.findPlayer(socket.id);
         socket.emit('boardStatus', room.boardPayload);
+        const player = room.findPlayer(socket.id);
         if (player) socket.emit('getPlayerData', { hand: player.hand });
     });
 
@@ -114,7 +156,7 @@ function registerHandlers(io, socket) {
             if (room.players.length === 0) {
                 delete rooms[roomName];
             } else {
-                io.to(roomName).emit('updatePlayers', room.players.map(p => p.id));
+                io.to(roomName).emit('updateLobby', room.lobbyPayload);
             }
         }
         io.emit('updateRooms', buildRoomResponse());

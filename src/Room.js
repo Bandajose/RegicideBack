@@ -1,7 +1,15 @@
+const DEFAULT_CONFIG = {
+    maxPlayers: 4,
+    handSize: 5,
+    lives: 1,
+    randomBosses: true,
+};
+
 class Player {
     constructor(socketId) {
         this.id = socketId;
         this.hand = [];
+        this.ready = false;
     }
 }
 
@@ -10,6 +18,7 @@ class Room {
         this.players = [];
         this.gameStarted = false;
         this.turnIndex = 0;
+        this.config = { ...DEFAULT_CONFIG };
         this.board = {
             deck: [],
             grave: [],
@@ -20,6 +29,7 @@ class Room {
             playerPhase: '',
             endGame: false,
             winGame: false,
+            lives: 0,
         };
     }
 
@@ -40,7 +50,13 @@ class Room {
     }
 
     get isFull() {
-        return this.players.length >= 6;
+        return this.players.length >= this.config.maxPlayers;
+    }
+
+    // Todos los jugadores (excepto el líder) deben estar listos
+    get allReady() {
+        if (this.players.length < 2) return false;
+        return this.players.slice(1).every(p => p.ready);
     }
 
     nextTurn() {
@@ -48,7 +64,25 @@ class Room {
         this.board.playerTurn = this.currentPlayer.id;
     }
 
-    // Payload listo para emitir al frontend (incluye conteo de cartas por jugador)
+    updateConfig(config) {
+        const { maxPlayers, handSize, lives, randomBosses } = config;
+        // Clamp contra el mínimo de jugadores actuales
+        const minPlayers = Math.max(2, this.players.length);
+        if (maxPlayers !== undefined) this.config.maxPlayers = Math.min(5, Math.max(minPlayers, maxPlayers));
+        if (handSize    !== undefined) this.config.handSize   = Math.min(8, Math.max(5, handSize));
+        if (lives       !== undefined) this.config.lives      = Math.min(3, Math.max(1, lives));
+        if (randomBosses !== undefined) this.config.randomBosses = Boolean(randomBosses);
+    }
+
+    // Payload del lobby (jugadores + config)
+    get lobbyPayload() {
+        return {
+            players: this.players.map(p => ({ id: p.id, ready: p.ready })),
+            config: { ...this.config },
+        };
+    }
+
+    // Payload del tablero (incluye conteo de cartas por jugador)
     get boardPayload() {
         return {
             ...this.board,
