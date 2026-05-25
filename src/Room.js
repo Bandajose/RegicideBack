@@ -6,9 +6,10 @@ const DEFAULT_CONFIG = {
 };
 
 class Player {
-    constructor(socketId, name = 'Jugador') {
+    constructor(socketId, name = 'Jugador', sessionId = '') {
         this.id = socketId;
         this.name = name;
+        this.sessionId = sessionId || socketId;
         this.hand = [];
         this.ready = false;
     }
@@ -34,8 +35,12 @@ class Room {
         };
     }
 
-    addPlayer(socketId, name) {
-        this.players.push(new Player(socketId, name));
+    addPlayer(socketId, name, sessionId) {
+        this.players.push(new Player(socketId, name, sessionId));
+    }
+
+    findPlayerBySession(sessionId) {
+        return this.players.find(p => p.sessionId === sessionId);
     }
 
     removePlayer(socketId) {

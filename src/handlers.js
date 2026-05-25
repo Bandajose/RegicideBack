@@ -46,20 +46,48 @@ function registerHandlers(io, socket) {
     });
 
     socket.on('joinRoom', (data, callback) => {
-        const roomName    = typeof data === 'string' ? data : data?.roomName;
-        const playerName  = (typeof data === 'object' && data?.playerName) ? String(data.playerName).trim() : 'Jugador';
+        const roomName   = typeof data === 'string' ? data : data?.roomName;
+        const playerName = (typeof data === 'object' && data?.playerName) ? String(data.playerName).trim() : 'Jugador';
+        const sessionId  = (typeof data === 'object' && data?.sessionId)  ? String(data.sessionId)          : socket.id;
         const room = rooms[roomName];
         if (!room)            return callback?.({ success: false, message: 'Sala no encontrada' });
         if (room.isFull)      return callback?.({ success: false, message: 'Sala llena' });
         if (room.gameStarted) return callback?.({ success: false, message: 'Partida en curso' });
 
-        room.addPlayer(socket.id, playerName || 'Jugador');
+        room.addPlayer(socket.id, playerName || 'Jugador', sessionId);
         socket.join(roomName);
         console.log(`🎮 Jugador ${socket.id} unido a "${roomName}"`);
 
         callback?.({ success: true, message: 'Unido a la sala', playerId: socket.id });
         io.to(roomName).emit('updateLobby', room.lobbyPayload);
         io.emit('updateRooms', buildRoomResponse());
+    });
+
+    // ─── Reconexión tras recarga de página ─────────────────────────────────
+    socket.on('rejoinRoom', ({ roomName, sessionId }) => {
+        const room = rooms[roomName];
+        if (!room) return socket.emit('rejoinFailed');
+
+        const player = room.findPlayerBySession(sessionId);
+        if (!player) return socket.emit('rejoinFailed');
+
+        const oldId = player.id;
+        player.id = socket.id;
+
+        // Si era el turno del jugador, actualizar playerTurn
+        if (room.board.playerTurn === oldId) room.board.playerTurn = socket.id;
+
+        socket.join(roomName);
+        console.log(`🔄 Jugador reconectado: ${oldId} → ${socket.id} en "${roomName}"`);
+
+        socket.emit('rejoinSuccess', { playerId: socket.id });
+
+        if (room.gameStarted) {
+            socket.emit('boardStatus', room.boardPayload);
+            socket.emit('getPlayerData', { hand: player.hand });
+        } else {
+            io.to(roomName).emit('updateLobby', room.lobbyPayload);
+        }
     });
 
     // El líder actualiza la configuración de la sala
@@ -154,14 +182,22 @@ function registerHandlers(io, socket) {
         console.log('❌ Usuario desconectado:', socket.id);
         for (const roomName in rooms) {
             const room = rooms[roomName];
-            room.removePlayer(socket.id);
-            if (room.players.length === 0) {
-                delete rooms[roomName];
+            const player = room.findPlayer(socket.id);
+            if (!player) continue;
+
+            if (room.gameStarted) {
+                // Mantener al jugador en la partida para permitir reconexión
+                console.log(`⏸️ Jugador ${socket.id} desconectado de partida en "${roomName}" (slot reservado)`);
             } else {
-                io.to(roomName).emit('updateLobby', room.lobbyPayload);
+                room.removePlayer(socket.id);
+                if (room.players.length === 0) {
+                    delete rooms[roomName];
+                } else {
+                    io.to(roomName).emit('updateLobby', room.lobbyPayload);
+                }
+                io.emit('updateRooms', buildRoomResponse());
             }
         }
-        io.emit('updateRooms', buildRoomResponse());
     });
 }
 
