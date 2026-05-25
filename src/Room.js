@@ -6,8 +6,9 @@ const DEFAULT_CONFIG = {
 };
 
 class Player {
-    constructor(socketId) {
+    constructor(socketId, name = 'Jugador') {
         this.id = socketId;
+        this.name = name;
         this.hand = [];
         this.ready = false;
     }
@@ -33,8 +34,8 @@ class Room {
         };
     }
 
-    addPlayer(socketId) {
-        this.players.push(new Player(socketId));
+    addPlayer(socketId, name) {
+        this.players.push(new Player(socketId, name));
     }
 
     removePlayer(socketId) {
@@ -77,7 +78,7 @@ class Room {
     // Payload del lobby (jugadores + config)
     get lobbyPayload() {
         return {
-            players: this.players.map(p => ({ id: p.id, ready: p.ready })),
+            players: this.players.map(p => ({ id: p.id, name: p.name, ready: p.ready })),
             config: { ...this.config },
         };
     }
@@ -86,7 +87,7 @@ class Room {
     get boardPayload() {
         return {
             ...this.board,
-            players: this.players.map(p => ({ id: p.id, cardCount: p.hand.length })),
+            players: this.players.map(p => ({ id: p.id, name: p.name, cardCount: p.hand.length })),
         };
     }
 }

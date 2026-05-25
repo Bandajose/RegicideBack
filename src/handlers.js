@@ -45,13 +45,15 @@ function registerHandlers(io, socket) {
         socket.emit('updateRooms', buildRoomResponse(pagination?.page, pagination?.size));
     });
 
-    socket.on('joinRoom', (roomName, callback) => {
+    socket.on('joinRoom', (data, callback) => {
+        const roomName    = typeof data === 'string' ? data : data?.roomName;
+        const playerName  = (typeof data === 'object' && data?.playerName) ? String(data.playerName).trim() : 'Jugador';
         const room = rooms[roomName];
         if (!room)            return callback?.({ success: false, message: 'Sala no encontrada' });
         if (room.isFull)      return callback?.({ success: false, message: 'Sala llena' });
         if (room.gameStarted) return callback?.({ success: false, message: 'Partida en curso' });
 
-        room.addPlayer(socket.id);
+        room.addPlayer(socket.id, playerName || 'Jugador');
         socket.join(roomName);
         console.log(`🎮 Jugador ${socket.id} unido a "${roomName}"`);
 
