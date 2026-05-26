@@ -170,6 +170,27 @@ function registerHandlers(io, socket) {
         io.to(roomName).emit('boardStatus', room.boardPayload);
     });
 
+    socket.on('claimJokerTurn', ({ roomName, playerId }) => {
+        const room = rooms[roomName];
+        if (!room?.gameStarted) return;
+        if (room.board.playerPhase !== 'Joker') return;
+
+        const claimingIndex = room.players.findIndex(p => p.id === playerId);
+        if (claimingIndex === -1) return;
+
+        const player = room.players[claimingIndex];
+        if (player.hand.length === 0) return;
+
+        room.turnIndex = claimingIndex;
+        room.board.playerTurn = playerId;
+        room.board.playerPhase = 'attack';
+
+        console.log(`🃏 Jugador ${playerId} tomó el turno del Joker en "${roomName}"`);
+
+        room.players.forEach(p => io.to(p.id).emit('getPlayerData', { hand: p.hand }));
+        io.to(roomName).emit('boardStatus', room.boardPayload);
+    });
+
     socket.on('getBoardStatus', (roomName) => {
         const room = rooms[roomName];
         if (!room?.gameStarted) return;
