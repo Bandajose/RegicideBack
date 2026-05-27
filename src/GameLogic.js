@@ -123,7 +123,7 @@ function resolveAttack(room, cards) {
         }
 
         if (suit === '♣') multiplePoints = true;
-        if (suit === '♠') board.currentBoss.damage -= totalPoints;
+        if (suit === '♠') board.currentBoss.damage = Math.max(0, board.currentBoss.damage - totalPoints);
     }
 
     board.currentBoss.health -= multiplePoints ? totalPoints * 2 : totalPoints;
