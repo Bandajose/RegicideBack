@@ -230,6 +230,12 @@ function registerHandlers(io, socket) {
         io.to(roomName).emit('boardStatus', room.boardPayload);
     });
 
+    socket.on('chatMessage', ({ roomName, playerName, message }) => {
+        if (!rooms[roomName]) return;
+        if (!playerName || !message) return;
+        io.to(roomName).emit('chatMessage', { playerName: String(playerName).trim(), message: String(message).trim() });
+    });
+
     socket.on('getBoardStatus', (roomName) => {
         const room = rooms[roomName];
         if (!room?.gameStarted) return;
