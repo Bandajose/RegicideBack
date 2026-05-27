@@ -138,8 +138,8 @@ function resolveDefend(room, cards) {
     const totalPoints = processCards(room, cards);
 
     if (board.currentBoss.damage > totalPoints) {
+        board.lives--;
         if (board.lives > 0) {
-            board.lives--;
             room.nextTurn();
             board.playerPhase = 'attack';
         } else {
