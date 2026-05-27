@@ -2,6 +2,19 @@ const { Room } = require('./Room');
 const { generateDeck, generateBosses, buildBoss, dealHands, resolveAttack, resolveDefend } = require('./GameLogic');
 
 const rooms = {};
+const disconnectTimers = {};
+
+const DISCONNECT_WAIT_MS  = 20_000;
+const ROOM_CLEANUP_MS     = 30_000;
+
+function scheduleRoomDelete(io, roomName, delayMs) {
+    setTimeout(() => {
+        if (!rooms[roomName]) return;
+        delete rooms[roomName];
+        io.emit('updateRooms', buildRoomResponse());
+        console.log(`🗑️  Sala "${roomName}" eliminada`);
+    }, delayMs);
+}
 
 // ─── Respuesta paginada de salas ───────────────────────────────────────────
 
@@ -79,6 +92,13 @@ function registerHandlers(io, socket) {
 
         socket.join(roomName);
         console.log(`🔄 Jugador reconectado: ${oldId} → ${socket.id} en "${roomName}"`);
+
+        // Cancelar temporizador de desconexión si estaba activo
+        if (disconnectTimers[player.sessionId]) {
+            clearTimeout(disconnectTimers[player.sessionId]);
+            delete disconnectTimers[player.sessionId];
+            io.to(roomName).emit('playerReconnected', { playerName: player.name });
+        }
 
         socket.emit('rejoinSuccess', { playerId: socket.id });
 
@@ -168,6 +188,25 @@ function registerHandlers(io, socket) {
 
         room.players.forEach(p => io.to(p.id).emit('getPlayerData', { hand: p.hand }));
         io.to(roomName).emit('boardStatus', room.boardPayload);
+
+        if (room.board.endGame) {
+            scheduleRoomDelete(io, roomName, ROOM_CLEANUP_MS);
+        }
+    });
+
+    socket.on('leaveGame', ({ roomName, playerId }) => {
+        const room = rooms[roomName];
+        if (!room?.gameStarted) return;
+
+        const player = room.findPlayer(playerId);
+        if (!player) return;
+
+        console.log(`🚪 Jugador "${player.name}" abandonó la partida en "${roomName}"`);
+
+        room.board.endGame = true;
+        io.to(roomName).emit('playerLeft', { playerName: player.name });
+        io.to(roomName).emit('boardStatus', room.boardPayload);
+        scheduleRoomDelete(io, roomName, ROOM_CLEANUP_MS);
     });
 
     socket.on('claimJokerTurn', ({ roomName, playerId }) => {
@@ -207,8 +246,25 @@ function registerHandlers(io, socket) {
             if (!player) continue;
 
             if (room.gameStarted) {
-                // Mantener al jugador en la partida para permitir reconexión
-                console.log(`⏸️ Jugador ${socket.id} desconectado de partida en "${roomName}" (slot reservado)`);
+                console.log(`⏸️ Jugador "${player.name}" desconectado de "${roomName}" — esperando reconexión (${DISCONNECT_WAIT_MS / 1000}s)`);
+
+                io.to(roomName).emit('playerDisconnected', {
+                    playerName: player.name,
+                    secondsLeft: DISCONNECT_WAIT_MS / 1000,
+                });
+
+                const { sessionId, name } = player;
+                disconnectTimers[sessionId] = setTimeout(() => {
+                    delete disconnectTimers[sessionId];
+                    const r = rooms[roomName];
+                    if (!r) return;
+
+                    console.log(`⏰ Tiempo agotado para "${name}" en "${roomName}" — terminando partida`);
+                    r.board.endGame = true;
+                    io.to(roomName).emit('boardStatus', r.boardPayload);
+                    scheduleRoomDelete(io, roomName, 10_000);
+                }, DISCONNECT_WAIT_MS);
+
             } else {
                 room.removePlayer(socket.id);
                 if (room.players.length === 0) {
