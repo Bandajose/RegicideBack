@@ -172,7 +172,7 @@ function _advanceBoss(room) {
     const bossCard = { value: board.currentBoss.value, suit: board.currentBoss.suit };
 
     if (board.currentBoss.health === 0)
-        room.currentPlayer.hand.push(bossCard);   // daño exacto → mano del jugador
+        board.deck.push(bossCard);                // daño exacto → parte superior del mazo
     else
         board.grave.push(bossCard);               // daño excesivo → cementerio
 
