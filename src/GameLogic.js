@@ -169,10 +169,12 @@ function _advanceBoss(room) {
         return;
     }
 
+    const bossCard = { value: board.currentBoss.value, suit: board.currentBoss.suit };
+
     if (board.currentBoss.health === 0)
-        board.deck.unshift({ value: board.currentBoss.value, suit: board.currentBoss.suit });
+        room.currentPlayer.hand.push(bossCard);   // daño exacto → mano del jugador
     else
-        board.grave.push({ value: board.currentBoss.value, suit: board.currentBoss.suit });
+        board.grave.push(bossCard);               // daño excesivo → cementerio
 
     board.grave = [...board.grave, ...board.table];
     board.table = [];
