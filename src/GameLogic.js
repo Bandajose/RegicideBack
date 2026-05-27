@@ -135,6 +135,15 @@ function resolveAttack(room, cards) {
 
 function resolveDefend(room, cards) {
     const { board } = room;
+
+    // Joker en defensa: cancela todo el daño del jefe y activa fase Joker
+    if (cards.some(c => c.suit === 'Joker')) {
+        processCards(room, cards);
+        room.nextTurn();
+        board.playerPhase = 'Joker';
+        return;
+    }
+
     const totalPoints = processCards(room, cards);
 
     if (board.currentBoss.damage > totalPoints) {
