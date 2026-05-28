@@ -155,6 +155,22 @@ function registerHandlers(io, socket) {
         io.emit('updateRooms', buildRoomResponse());
     });
 
+    socket.on('leaveRoom', (roomName) => {
+        const room = rooms[roomName];
+        if (!room || room.gameStarted) return;
+
+        room.removePlayer(socket.id);
+        socket.leave(roomName);
+        console.log(`🚪 Jugador ${socket.id} abandonó el lobby "${roomName}"`);
+
+        if (room.players.length === 0) {
+            delete rooms[roomName];
+        } else {
+            io.to(roomName).emit('updateLobby', room.lobbyPayload);
+        }
+        io.emit('updateRooms', buildRoomResponse());
+    });
+
     socket.on('startGame', (roomName) => {
         const room = rooms[roomName];
         if (!room || room.players.length < 2 || room.gameStarted) return;
