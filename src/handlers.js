@@ -21,7 +21,7 @@ function scheduleRoomDelete(io, roomName, delayMs) {
 function buildRoomResponse(page = '1', size = '5') {
     const pageNum = parseInt(page) || 1;
     const sizeNum = parseInt(size) || 5;
-    const roomNames = Object.keys(rooms);
+    const roomNames = Object.keys(rooms).filter(name => !rooms[name].gameStarted);
     const total = roomNames.length;
     const totalPages = Math.max(1, Math.ceil(total / sizeNum));
     const start = (pageNum - 1) * sizeNum;
