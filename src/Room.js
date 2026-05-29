@@ -3,6 +3,7 @@ const DEFAULT_CONFIG = {
     handSize: 5,
     lives: 1,
     randomBosses: true,
+    turnTime: 0, // segundos por turno; 0 = sin límite
 };
 
 class Player {
@@ -21,6 +22,8 @@ class Room {
         this.gameStarted = false;
         this.turnIndex = 0;
         this.config = { ...DEFAULT_CONFIG };
+        this.timerStartedAt = 0;
+        this.timerDuration = 0;
         this.board = {
             deck: [],
             grave: [],
@@ -71,13 +74,14 @@ class Room {
     }
 
     updateConfig(config) {
-        const { maxPlayers, handSize, lives, randomBosses } = config;
+        const { maxPlayers, handSize, lives, randomBosses, turnTime } = config;
         // Clamp contra el mínimo de jugadores actuales
         const minPlayers = Math.max(2, this.players.length);
-        if (maxPlayers !== undefined) this.config.maxPlayers = Math.min(5, Math.max(minPlayers, maxPlayers));
-        if (handSize    !== undefined) this.config.handSize   = Math.min(8, Math.max(5, handSize));
-        if (lives       !== undefined) this.config.lives      = Math.min(3, Math.max(1, lives));
+        if (maxPlayers   !== undefined) this.config.maxPlayers   = Math.min(5, Math.max(minPlayers, maxPlayers));
+        if (handSize     !== undefined) this.config.handSize     = Math.min(8, Math.max(5, handSize));
+        if (lives        !== undefined) this.config.lives        = Math.min(3, Math.max(1, lives));
         if (randomBosses !== undefined) this.config.randomBosses = Boolean(randomBosses);
+        if (turnTime     !== undefined) this.config.turnTime     = [0, 30, 60, 90].includes(Number(turnTime)) ? Number(turnTime) : this.config.turnTime;
     }
 
     // Payload del lobby (jugadores + config)

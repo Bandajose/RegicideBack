@@ -3,9 +3,86 @@ const { generateDeck, generateBosses, buildBoss, dealHands, resolveAttack, resol
 
 const rooms = {};
 const disconnectTimers = {};
+const turnTimers = {};
 
 const DISCONNECT_WAIT_MS  = 20_000;
 const ROOM_CLEANUP_MS     = 30_000;
+
+// ─── Temporizador de turno ─────────────────────────────────────────────────
+
+function clearTurnTimer(roomName) {
+    if (turnTimers[roomName]) {
+        clearTimeout(turnTimers[roomName]);
+        delete turnTimers[roomName];
+    }
+}
+
+function emitTimerToSocket(socket, room) {
+    if (!room.timerDuration || !room.timerStartedAt) return;
+    const elapsed = Math.floor((Date.now() - room.timerStartedAt) / 1000);
+    const remaining = Math.max(0, room.timerDuration - elapsed);
+    if (remaining > 0) {
+        socket.emit('turnTimer', {
+            playerId: room.board.playerTurn,
+            seconds:  remaining,
+            timerMax: room.timerDuration,
+            phase:    room.board.playerPhase,
+        });
+    }
+}
+
+function startTurnTimer(io, room, roomName) {
+    clearTurnTimer(roomName);
+    const timeLimit = room.config.turnTime;
+    if (!timeLimit || room.board.endGame) {
+        room.timerStartedAt = 0;
+        room.timerDuration = 0;
+        return;
+    }
+
+    room.timerStartedAt = Date.now();
+    room.timerDuration = timeLimit;
+
+    io.to(roomName).emit('turnTimer', {
+        playerId: room.board.playerTurn,
+        seconds:  timeLimit,
+        timerMax: timeLimit,
+        phase:    room.board.playerPhase,
+    });
+
+    turnTimers[roomName] = setTimeout(() => {
+        delete turnTimers[roomName];
+        room.timerStartedAt = 0;
+        room.timerDuration = 0;
+        if (!room.gameStarted || room.board.endGame) return;
+
+        const phase = room.board.playerPhase;
+        if (phase === 'attack') {
+            room.board.passedToDefend = true;
+            resolveAttack(room, []);
+        } else if (phase === 'defend') {
+            room.board.passedToDefend = false;
+            resolveDefend(room, []);
+        } else if (phase === 'Joker') {
+            // Auto-claim para el primer jugador con cartas
+            const player = room.players.find(p => p.hand.length > 0);
+            if (player) {
+                room.turnIndex = room.players.indexOf(player);
+                room.board.playerTurn = player.id;
+                room.board.playerPhase = 'attack';
+            }
+        }
+
+        room.players.forEach(p => io.to(p.id).emit('getPlayerData', { hand: p.hand }));
+        io.to(roomName).emit('boardStatus', room.boardPayload);
+
+        if (room.board.endGame) {
+            scheduleRoomDelete(io, roomName, ROOM_CLEANUP_MS);
+        } else {
+            startTurnTimer(io, room, roomName);
+        }
+    }, timeLimit * 1_000);
+}
 
 function scheduleRoomDelete(io, roomName, delayMs) {
     setTimeout(() => {
@@ -105,6 +182,7 @@ function registerHandlers(io, socket) {
         if (room.gameStarted) {
             socket.emit('boardStatus', room.boardPayload);
             socket.emit('getPlayerData', { hand: player.hand });
+            emitTimerToSocket(socket, room);
         } else {
             io.to(roomName).emit('updateLobby', room.lobbyPayload);
         }
@@ -192,6 +270,7 @@ function registerHandlers(io, socket) {
         room.players.forEach(p => io.to(p.id).emit('getPlayerData', { hand: p.hand }));
         io.to(roomName).emit('boardStatus', room.boardPayload);
         io.emit('updateRooms', buildRoomResponse());
+        startTurnTimer(io, room, roomName);
     });
 
     socket.on('playTurn', ({ roomName, playerId, action, cards }) => {
@@ -211,7 +290,10 @@ function registerHandlers(io, socket) {
         io.to(roomName).emit('boardStatus', room.boardPayload);
 
         if (room.board.endGame) {
+            clearTurnTimer(roomName);
             scheduleRoomDelete(io, roomName, ROOM_CLEANUP_MS);
+        } else {
+            startTurnTimer(io, room, roomName);
         }
     });
 
@@ -224,6 +306,7 @@ function registerHandlers(io, socket) {
 
         console.log(`🚪 Jugador "${player.name}" abandonó la partida en "${roomName}"`);
 
+        clearTurnTimer(roomName);
         room.board.endGame = true;
         io.to(roomName).emit('playerLeft', { playerName: player.name });
         io.to(roomName).emit('boardStatus', room.boardPayload);
@@ -241,6 +324,7 @@ function registerHandlers(io, socket) {
         room.board.playerPhase = 'attack';
         console.log(`↩ Jugador ${socket.id} regresó a fase de ataque en "${roomName}"`);
         io.to(roomName).emit('boardStatus', room.boardPayload);
+        startTurnTimer(io, room, roomName);
     });
 
     socket.on('claimJokerTurn', ({ roomName, playerId }) => {
@@ -262,6 +346,7 @@ function registerHandlers(io, socket) {
 
         room.players.forEach(p => io.to(p.id).emit('getPlayerData', { hand: p.hand }));
         io.to(roomName).emit('boardStatus', room.boardPayload);
+        startTurnTimer(io, room, roomName);
     });
 
     socket.on('chatMessage', ({ roomName, playerName, message }) => {
@@ -276,6 +361,7 @@ function registerHandlers(io, socket) {
         socket.emit('boardStatus', room.boardPayload);
         const player = room.findPlayer(socket.id);
         if (player) socket.emit('getPlayerData', { hand: player.hand });
+        emitTimerToSocket(socket, room);
     });
 
     socket.on('disconnect', () => {
