@@ -199,8 +199,13 @@ function registerHandlers(io, socket) {
         if (!room?.gameStarted) return;
         if (room.currentPlayer.id !== playerId) return;
 
-        if (action === 'attack') resolveAttack(room, cards);
-        else if (action === 'defend') resolveDefend(room, cards);
+        if (action === 'attack') {
+            room.board.passedToDefend = cards.length === 0;
+            resolveAttack(room, cards);
+        } else if (action === 'defend') {
+            room.board.passedToDefend = false;
+            resolveDefend(room, cards);
+        }
 
         room.players.forEach(p => io.to(p.id).emit('getPlayerData', { hand: p.hand }));
         io.to(roomName).emit('boardStatus', room.boardPayload);
@@ -223,6 +228,19 @@ function registerHandlers(io, socket) {
         io.to(roomName).emit('playerLeft', { playerName: player.name });
         io.to(roomName).emit('boardStatus', room.boardPayload);
         scheduleRoomDelete(io, roomName, ROOM_CLEANUP_MS);
+    });
+
+    socket.on('returnToAttack', (roomName) => {
+        const room = rooms[roomName];
+        if (!room?.gameStarted) return;
+        if (room.currentPlayer.id !== socket.id) return;
+        if (room.board.playerPhase !== 'defend') return;
+        if (!room.board.passedToDefend) return; // Solo si pasó sin atacar
+
+        room.board.passedToDefend = false;
+        room.board.playerPhase = 'attack';
+        console.log(`↩ Jugador ${socket.id} regresó a fase de ataque en "${roomName}"`);
+        io.to(roomName).emit('boardStatus', room.boardPayload);
     });
 
     socket.on('claimJokerTurn', ({ roomName, playerId }) => {
